@@ -23,6 +23,9 @@ from ..models.export import get_model_info
 from ..models.unet import UNet
 from .. import __version__
 
+from fastapi.middleware.cors import CORSMiddleware
+from .middleware import APIKeyMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,17 @@ app = FastAPI(
     description="Commercial-grade 2D lip-sync video generation API",
     version=__version__,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+app.add_middleware(APIKeyMiddleware)
 
 tasks: Dict[str, dict] = {}
 executor = ThreadPoolExecutor(max_workers=2)

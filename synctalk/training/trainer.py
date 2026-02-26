@@ -1,11 +1,5 @@
-"""Unified training pipeline with AMP, LR scheduling, and checkpoint resumption.
-
-Merges train.py and train_328.py, and adds:
-- Mixed precision training (AMP)
-- Learning rate scheduling (Cosine Annealing with Warmup)
-- Checkpoint resumption
-- TensorBoard logging
-- Proper gradient zeroing
+"""Unified training pipeline with AMP, LR scheduling, checkpoint resumption,
+data augmentation, and validation metrics.
 """
 
 import os
@@ -23,9 +17,11 @@ from ..configs.base import SyncTalkConfig
 from ..models.unet import UNet
 from ..models.syncnet import SyncNet
 from ..data.dataset import LipSyncDataset, SyncNetDataset
+from ..data.augmentation import TrainAugmentation
 from ..utils.device import get_device
 from ..utils.io import ensure_dir
 from .losses import PerceptualLoss, cosine_loss
+from .metrics import psnr, ssim, MetricsTracker
 
 logger = logging.getLogger(__name__)
 
@@ -101,22 +97,36 @@ class Trainer:
 
     def train_unet(self, dataset_dir: str, save_dir: str,
                    syncnet_checkpoint: str = None, resume_from: str = None):
-        """Train main UNet lip-sync model."""
+        """Train main UNet lip-sync model with augmentation and validation."""
         ensure_dir(save_dir)
         cfg = self.config
 
-        dataset = LipSyncDataset(dataset_dir, cfg.model)
-        data_loader = DataLoader(
-            dataset,
-            batch_size=cfg.train.batch_size,
-            shuffle=True,
-            drop_last=False,
-            num_workers=cfg.train.num_workers,
+        augmentation = TrainAugmentation(
+            color_jitter=True, horizontal_flip=False,
+            gaussian_noise=True, p_color=0.3, p_noise=0.2,
         )
+
+        train_dataset = LipSyncDataset(
+            dataset_dir, cfg.model, augmentation=augmentation,
+            split="train", val_ratio=0.1,
+        )
+        val_dataset = LipSyncDataset(
+            dataset_dir, cfg.model, augmentation=None,
+            split="val", val_ratio=0.1,
+        )
+        train_loader = DataLoader(
+            train_dataset, batch_size=cfg.train.batch_size,
+            shuffle=True, drop_last=False, num_workers=cfg.train.num_workers,
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=cfg.train.batch_size,
+            shuffle=False, num_workers=cfg.train.num_workers,
+        ) if len(val_dataset) > 0 else None
+
+        logger.info(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
         net = UNet.from_config(cfg.model).to(self.device)
         optimizer = optim.Adam(net.parameters(), lr=cfg.train.lr)
-
         scheduler = self._create_scheduler(optimizer)
 
         start_epoch = 0
@@ -134,10 +144,15 @@ class Trainer:
             syncnet.load_state_dict(torch.load(syncnet_checkpoint, map_location=self.device))
             logger.info(f"Loaded SyncNet: {syncnet_checkpoint}")
 
+        best_val_loss = float("inf")
+        train_tracker = MetricsTracker()
+
         for epoch in range(start_epoch, cfg.train.epochs):
             net.train()
-            with tqdm(total=len(dataset), desc=f"Epoch {epoch + 1}/{cfg.train.epochs}", unit="img") as pbar:
-                for batch in data_loader:
+            train_tracker.reset()
+
+            with tqdm(total=len(train_dataset), desc=f"Epoch {epoch + 1}/{cfg.train.epochs}", unit="img") as pbar:
+                for batch in train_loader:
                     imgs, labels, audio_feat = batch
                     imgs = imgs.to(self.device)
                     labels = labels.to(self.device)
@@ -162,17 +177,59 @@ class Trainer:
                     self.scaler.step(optimizer)
                     self.scaler.update()
 
+                    bs = imgs.shape[0]
+                    train_tracker.update("loss", loss.item(), bs)
+                    train_tracker.update("loss_pixel", loss_pixel.item(), bs)
                     pbar.set_postfix(**{"loss": f"{loss.item():.4f}"})
-                    pbar.update(imgs.shape[0])
+                    pbar.update(bs)
 
             if scheduler:
                 scheduler.step()
+
+            lr_current = optimizer.param_groups[0]["lr"]
+            logger.info(f"Train {train_tracker} | lr={lr_current:.2e}")
+
+            if val_loader and (epoch + 1) % cfg.train.save_interval == 0:
+                val_metrics = self._validate(net, val_loader, pixel_criterion, content_loss)
+                logger.info(f"Val   {val_metrics}")
+
+                val_loss = val_metrics.get("loss")
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    self._save_checkpoint(save_dir, epoch, net, optimizer, scheduler,
+                                          tag="best")
 
             if (epoch + 1) % cfg.train.save_interval == 0:
                 self._save_checkpoint(save_dir, epoch, net, optimizer, scheduler)
 
         self._save_checkpoint(save_dir, cfg.train.epochs - 1, net, optimizer, scheduler)
         logger.info("Training complete")
+
+    @torch.no_grad()
+    def _validate(self, net, val_loader, pixel_criterion, content_loss):
+        """Run validation loop and return metrics."""
+        net.eval()
+        tracker = MetricsTracker()
+
+        for batch in val_loader:
+            imgs, labels, audio_feat = batch
+            imgs = imgs.to(self.device)
+            labels = labels.to(self.device)
+            audio_feat = audio_feat.to(self.device)
+
+            with autocast(enabled=self.use_amp):
+                preds = net(imgs, audio_feat)
+                loss_pixel = pixel_criterion(preds, labels)
+                loss_perceptual = content_loss.get_loss(preds, labels)
+                loss = loss_pixel + loss_perceptual * 0.01
+
+            bs = imgs.shape[0]
+            tracker.update("loss", loss.item(), bs)
+            tracker.update("psnr", psnr(preds, labels), bs)
+            tracker.update("ssim", ssim(preds, labels), bs)
+
+        net.train()
+        return tracker
 
     def _create_scheduler(self, optimizer):
         cfg = self.config.train
@@ -183,7 +240,8 @@ class Trainer:
             )
         return None
 
-    def _save_checkpoint(self, save_dir, epoch, model, optimizer, scheduler):
+    def _save_checkpoint(self, save_dir, epoch, model, optimizer, scheduler,
+                         tag=None):
         state = {
             "epoch": epoch + 1,
             "model_state_dict": model.state_dict(),
@@ -191,7 +249,8 @@ class Trainer:
         }
         if scheduler:
             state["scheduler_state_dict"] = scheduler.state_dict()
-        path = os.path.join(save_dir, f"{epoch + 1}.pth")
+        filename = f"{tag}.pth" if tag else f"{epoch + 1}.pth"
+        path = os.path.join(save_dir, filename)
         torch.save(state, path)
         logger.info(f"Checkpoint saved: {path}")
 
