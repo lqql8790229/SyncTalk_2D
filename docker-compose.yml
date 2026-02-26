@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./dataset:/app/dataset
+      - ./checkpoint:/app/checkpoint
+      - ./syncnet_ckpt:/app/syncnet_ckpt
+      - ./result:/app/result
+      - ./demo:/app/demo
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  api-cpu:
+    build: .
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./dataset:/app/dataset
+      - ./checkpoint:/app/checkpoint
+      - ./syncnet_ckpt:/app/syncnet_ckpt
+      - ./result:/app/result
+      - ./demo:/app/demo
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    profiles:
+      - cpu
+    restart: unless-stopped
