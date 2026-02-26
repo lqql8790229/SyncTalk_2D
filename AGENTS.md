@@ -3,7 +3,9 @@
 ## Cursor Cloud specific instructions
 
 ### Overview
-SyncTalk_2D is a Python ML pipeline for 2D lip-sync video generation. It takes a source video + audio and generates a lip-synced output. It is a CLI-based training/inference tool (no web server, no database).
+SyncTalk_2D is a Python ML pipeline for 2D lip-sync video generation. It takes a source video + audio and generates a lip-synced output. The codebase has two layers:
+- **Legacy code** (root-level `*.py`): Original scripts with hardcoded `.cuda()` and duplicate 160/328px files.
+- **`synctalk/` package**: Refactored commercial-grade package with unified models, configs, API, and CLI.
 
 ### Environment
 - **Python 3.10** required (installed via `deadsnakes` PPA: `python3.10`).
@@ -19,20 +21,29 @@ SyncTalk_2D is a Python ML pipeline for 2D lip-sync video generation. It takes a
 - **`data_utils/pfld_mobileone.py`** similarly imports `base_module` relatively. It runs correctly when invoked from the `data_utils/` directory during the preprocessing pipeline.
 - Some code paths (e.g., `inference_328.py` line 68, `data_utils/ave/test_w2l_audio.py` line 118) hardcode `.cuda()`. These will fail on CPU. The `inference_328.py` line 37 does check `torch.cuda.is_available()` for the AudioEncoder device, but the UNet loading uses `.cuda()` directly. Training and full inference require a GPU.
 
-### Running
-- **Lint**: No linter is configured in this project. You can run `python -m py_compile <file.py>` on individual files.
-- **Tests**: No automated test suite exists. Validate by importing modules and running forward passes (see hello-world smoke test below).
-- **Hello-world smoke test** (CPU, no GPU needed):
+### Running (new synctalk package)
+- **Install**: `pip install -e .` (installs the `synctalk` package + all dependencies from `pyproject.toml`).
+- **CLI**: `python -m synctalk.cli --help` — unified entry point for preprocess/train/inference/serve.
+- **API server**: `python -m synctalk.cli serve --port 8000` — starts FastAPI server at `http://localhost:8000/docs`.
+- **Lint**: `python -m py_compile <file.py>` on individual files.
+- **Smoke test** (CPU, no GPU needed):
   ```bash
-  source /workspace/.venv/bin/activate
-  cd /workspace
+  source /workspace/.venv/bin/activate && cd /workspace
   python -c "
-  from utils import AudioEncoder, AudDataset; from torch.utils.data import DataLoader; import torch
-  model = AudioEncoder().eval()
-  model.load_state_dict({f'audio_encoder.{k}': v for k, v in torch.load('model/checkpoints/audio_visual_encoder.pth', map_location='cpu').items()})
+  from synctalk.models import UNet, AudioEncoder
+  from synctalk.data.audio import AudDataset
+  from torch.utils.data import DataLoader; import torch
+  ae = AudioEncoder().eval(); ae.load_pretrained('model/checkpoints/audio_visual_encoder.pth')
   ds = AudDataset('demo/talk_hb.wav'); dl = DataLoader(ds, batch_size=64)
-  outs = torch.cat([model(m) for m in dl]).cpu(); print(f'Audio features: {outs.shape}')
+  outs = torch.cat([ae(m) for m in dl]).cpu(); print(f'Audio features: {outs.shape}')
+  unet = UNet(6, 'ave', n_down_layers=5)
+  pred = unet(torch.randn(1,6,320,320), torch.randn(1,32,16,16))
+  print(f'UNet forward: {pred.shape}')
   "
   ```
+- **Training** (requires GPU): `python -m synctalk.cli train --stage full --dataset_dir ./dataset/May --use_syncnet`
+- **Inference** (requires GPU): `python -m synctalk.cli inference --name May --audio_path demo/talk_hb.wav`
+
+### Running (legacy code)
 - **Training** (requires GPU): `bash training_328.sh <name> <gpu_id>` — see `README.md`.
 - **Inference** (requires GPU): `python inference_328.py --name <name> --audio_path <wav>` — see `README.md`.
