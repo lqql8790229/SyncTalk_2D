@@ -1,14 +1,14 @@
-"""Login / Register view."""
+"""Login / Register view — compact centered layout."""
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QStackedWidget, QMessageBox,
+    QPushButton, QStackedWidget, QMessageBox, QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class LoginView(QWidget):
-    """Login and registration interface."""
+    """Compact, centered login and registration interface."""
 
     login_success = pyqtSignal(dict)
 
@@ -18,107 +18,123 @@ class LoginView(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(15)
-        layout.setContentsMargins(80, 40, 80, 40)
+        outer = QVBoxLayout(self)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setFixedWidth(380)
+        card.setStyleSheet(
+            "QFrame { background-color: #16213e; border-radius: 12px; }")
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(12)
+        card_layout.setContentsMargins(36, 32, 36, 28)
 
         title = QLabel("SyncTalk")
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        card_layout.addWidget(title)
 
         subtitle = QLabel("AI 数字人直播助手")
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+        card_layout.addWidget(subtitle)
 
-        layout.addSpacing(20)
+        card_layout.addSpacing(8)
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_login_form())
         self.stack.addWidget(self._build_register_form())
-        layout.addWidget(self.stack)
+        card_layout.addWidget(self.stack)
+
+        outer.addWidget(card)
 
     def _build_login_form(self):
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.addWidget(QLabel("邮箱"))
         self.login_email = QLineEdit()
         self.login_email.setPlaceholderText("your@email.com")
+        self.login_email.setFixedHeight(36)
         layout.addWidget(self.login_email)
 
+        layout.addSpacing(4)
         layout.addWidget(QLabel("密码"))
         self.login_password = QLineEdit()
         self.login_password.setPlaceholderText("输入密码")
         self.login_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.login_password.setFixedHeight(36)
         layout.addWidget(self.login_password)
 
         layout.addSpacing(10)
-
-        btn_login = QPushButton("登 录")
-        btn_login.setObjectName("primary")
-        btn_login.clicked.connect(self._on_login)
-        layout.addWidget(btn_login)
+        btn = QPushButton("登 录")
+        btn.setObjectName("primary")
+        btn.setFixedHeight(38)
+        btn.clicked.connect(self._on_login)
+        layout.addWidget(btn)
 
         row = QHBoxLayout()
+        row.setContentsMargins(0, 4, 0, 0)
         row.addStretch()
-        lbl = QLabel("没有账号？")
-        lbl.setObjectName("subtitle")
-        row.addWidget(lbl)
-        btn_switch = QPushButton("注册")
-        btn_switch.setFlat(True)
-        btn_switch.setStyleSheet("color: #00d4ff; border: none; font-weight: bold;")
-        btn_switch.clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        row.addWidget(btn_switch)
+        row.addWidget(QLabel("没有账号？"))
+        link = QPushButton("注册")
+        link.setFlat(True)
+        link.setCursor(Qt.CursorShape.PointingHandCursor)
+        link.setStyleSheet("color:#00d4ff; border:none; font-weight:bold; padding:0;")
+        link.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        row.addWidget(link)
         row.addStretch()
         layout.addLayout(row)
-
         return w
 
     def _build_register_form(self):
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.addWidget(QLabel("昵称"))
         self.reg_name = QLineEdit()
         self.reg_name.setPlaceholderText("你的昵称")
+        self.reg_name.setFixedHeight(36)
         layout.addWidget(self.reg_name)
 
+        layout.addSpacing(4)
         layout.addWidget(QLabel("邮箱"))
         self.reg_email = QLineEdit()
         self.reg_email.setPlaceholderText("your@email.com")
+        self.reg_email.setFixedHeight(36)
         layout.addWidget(self.reg_email)
 
+        layout.addSpacing(4)
         layout.addWidget(QLabel("密码"))
         self.reg_password = QLineEdit()
         self.reg_password.setPlaceholderText("至少 6 位")
         self.reg_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.reg_password.setFixedHeight(36)
         layout.addWidget(self.reg_password)
 
         layout.addSpacing(10)
-
-        btn_reg = QPushButton("注 册")
-        btn_reg.setObjectName("primary")
-        btn_reg.clicked.connect(self._on_register)
-        layout.addWidget(btn_reg)
+        btn = QPushButton("注 册")
+        btn.setObjectName("primary")
+        btn.setFixedHeight(38)
+        btn.clicked.connect(self._on_register)
+        layout.addWidget(btn)
 
         row = QHBoxLayout()
+        row.setContentsMargins(0, 4, 0, 0)
         row.addStretch()
-        lbl = QLabel("已有账号？")
-        lbl.setObjectName("subtitle")
-        row.addWidget(lbl)
-        btn_back = QPushButton("登录")
-        btn_back.setFlat(True)
-        btn_back.setStyleSheet("color: #00d4ff; border: none; font-weight: bold;")
-        btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        row.addWidget(btn_back)
+        row.addWidget(QLabel("已有账号？"))
+        link = QPushButton("登录")
+        link.setFlat(True)
+        link.setCursor(Qt.CursorShape.PointingHandCursor)
+        link.setStyleSheet("color:#00d4ff; border:none; font-weight:bold; padding:0;")
+        link.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        row.addWidget(link)
         row.addStretch()
         layout.addLayout(row)
-
         return w
 
     def _on_login(self):
