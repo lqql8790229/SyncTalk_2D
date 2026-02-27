@@ -117,6 +117,15 @@ def cmd_cloud_server(args):
     )
 
 
+def cmd_gui(args):
+    from .gui.app import SyncTalkApp
+    app = SyncTalkApp(
+        server_url=args.server_url,
+        skip_login=args.skip_login,
+    )
+    sys.exit(app.run())
+
+
 def cmd_serve(args):
     import uvicorn
     uvicorn.run(
@@ -183,6 +192,11 @@ def main():
     p_live.add_argument("--no_preview", action="store_true", help="Disable preview window")
     p_live.add_argument("--device", default="auto")
 
+    # GUI
+    p_gui = subparsers.add_parser("gui", help="Launch desktop application")
+    p_gui.add_argument("--server_url", default="http://localhost:9000", help="Cloud API URL")
+    p_gui.add_argument("--skip_login", action="store_true", help="Skip login (dev mode)")
+
     # Cloud server
     p_cloud = subparsers.add_parser("cloud", help="Start cloud API server")
     p_cloud.add_argument("--host", default="0.0.0.0")
@@ -206,6 +220,7 @@ def main():
         "train": cmd_train,
         "inference": cmd_inference,
         "live": cmd_live,
+        "gui": cmd_gui,
         "serve": cmd_serve,
         "cloud": cmd_cloud_server,
     }

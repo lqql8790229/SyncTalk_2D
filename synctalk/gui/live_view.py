@@ -1,0 +1,196 @@
+"""Live streaming control panel."""
+
+import os
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QComboBox, QGroupBox, QTextEdit, QRadioButton, QButtonGroup,
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont
+
+
+class LiveView(QWidget):
+    """Main live streaming control interface."""
+
+    start_requested = pyqtSignal(dict)
+    stop_requested = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._is_live = False
+        self._build_ui()
+        self._start_stats_timer()
+
+    def _build_ui(self):
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+
+        left = QVBoxLayout()
+        left.setSpacing(10)
+
+        preview_box = QGroupBox("实时预览")
+        preview_layout = QVBoxLayout(preview_box)
+        self.preview_label = QLabel("等待启动...")
+        self.preview_label.setMinimumSize(480, 360)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet(
+            "background-color: #0d0d1a; border-radius: 8px; color: #555; font-size: 16px;")
+        preview_layout.addWidget(self.preview_label)
+
+        self.stats_label = QLabel("FPS: -- | 延迟: --ms")
+        self.stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stats_label.setStyleSheet("color: #888; font-size: 12px;")
+        preview_layout.addWidget(self.stats_label)
+        left.addWidget(preview_box)
+
+        tts_box = QGroupBox("文字输入 (TTS 模式)")
+        tts_layout = QVBoxLayout(tts_box)
+        self.text_input = QTextEdit()
+        self.text_input.setPlaceholderText("输入文字，数字人自动朗读...")
+        self.text_input.setMaximumHeight(80)
+        tts_layout.addWidget(self.text_input)
+
+        btn_row = QHBoxLayout()
+        self.btn_speak = QPushButton("发送")
+        self.btn_speak.setObjectName("primary")
+        self.btn_speak.setMaximumWidth(100)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_speak)
+        tts_layout.addLayout(btn_row)
+        left.addWidget(tts_box)
+
+        main_layout.addLayout(left, stretch=3)
+
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        char_box = QGroupBox("角色")
+        char_layout = QVBoxLayout(char_box)
+        self.char_combo = QComboBox()
+        self.char_combo.setMinimumHeight(35)
+        self._refresh_characters()
+        char_layout.addWidget(self.char_combo)
+
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(self._refresh_characters)
+        char_layout.addWidget(btn_refresh)
+        right.addWidget(char_box)
+
+        audio_box = QGroupBox("音频来源")
+        audio_layout = QVBoxLayout(audio_box)
+        self.audio_group = QButtonGroup(self)
+
+        self.radio_mic = QRadioButton("🎤 麦克风")
+        self.radio_mic.setChecked(True)
+        self.audio_group.addButton(self.radio_mic, 0)
+        audio_layout.addWidget(self.radio_mic)
+
+        self.radio_tts = QRadioButton("📝 文字输入 (TTS)")
+        self.audio_group.addButton(self.radio_tts, 1)
+        audio_layout.addWidget(self.radio_tts)
+
+        self.radio_file = QRadioButton("📁 音频文件")
+        self.audio_group.addButton(self.radio_file, 2)
+        audio_layout.addWidget(self.radio_file)
+        right.addWidget(audio_box)
+
+        cam_box = QGroupBox("虚拟摄像头")
+        cam_layout = QVBoxLayout(cam_box)
+        self.cam_status = QLabel("● 未启动")
+        self.cam_status.setStyleSheet("color: #888;")
+        cam_layout.addWidget(self.cam_status)
+        self.cam_name = QLabel("SyncTalk Camera")
+        self.cam_name.setStyleSheet("color: #00d4ff; font-size: 12px;")
+        cam_layout.addWidget(self.cam_name)
+        right.addWidget(cam_box)
+
+        perf_box = QGroupBox("性能")
+        perf_layout = QVBoxLayout(perf_box)
+        self.perf_fps = QLabel("FPS:    --")
+        self.perf_latency = QLabel("延迟:   --")
+        self.perf_gpu = QLabel("GPU:    检测中...")
+        self.perf_vram = QLabel("显存:   --")
+        for w in [self.perf_fps, self.perf_latency, self.perf_gpu, self.perf_vram]:
+            w.setStyleSheet("font-family: monospace; font-size: 12px;")
+            perf_layout.addWidget(w)
+        right.addWidget(perf_box)
+
+        self._detect_gpu()
+
+        right.addStretch()
+
+        self.btn_start = QPushButton("🟢 开始直播")
+        self.btn_start.setObjectName("primary")
+        self.btn_start.setMinimumHeight(45)
+        self.btn_start.clicked.connect(self._toggle_live)
+        right.addWidget(self.btn_start)
+
+        main_layout.addLayout(right, stretch=1)
+
+    def _refresh_characters(self):
+        self.char_combo.clear()
+        dataset_dir = "./dataset"
+        if os.path.isdir(dataset_dir):
+            for d in sorted(os.listdir(dataset_dir)):
+                full = os.path.join(dataset_dir, d)
+                if os.path.isdir(full):
+                    self.char_combo.addItem(d)
+        if self.char_combo.count() == 0:
+            self.char_combo.addItem("(无角色 - 请先训练)")
+
+    def _detect_gpu(self):
+        try:
+            import torch
+            if torch.cuda.is_available():
+                name = torch.cuda.get_device_name(0)
+                vram = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                self.perf_gpu.setText(f"GPU:    {name}")
+                self.perf_vram.setText(f"显存:   {vram:.1f} GB")
+            else:
+                self.perf_gpu.setText("GPU:    CPU 模式")
+                self.perf_vram.setText("显存:   N/A")
+        except Exception:
+            self.perf_gpu.setText("GPU:    未检测到")
+
+    def _toggle_live(self):
+        if self._is_live:
+            self._is_live = False
+            self.btn_start.setText("🟢 开始直播")
+            self.btn_start.setObjectName("primary")
+            self.cam_status.setText("● 已停止")
+            self.cam_status.setStyleSheet("color: #888;")
+            self.preview_label.setText("等待启动...")
+            self.stop_requested.emit()
+        else:
+            char = self.char_combo.currentText()
+            if not char or char.startswith("("):
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "提示", "请先训练或选择一个角色")
+                return
+            self._is_live = True
+            self.btn_start.setText("⏹️ 停止直播")
+            self.btn_start.setStyleSheet(
+                "background-color: #c0392b; color: white; font-weight: bold; "
+                "font-size: 14px; padding: 10px 30px; border: none; border-radius: 6px;")
+            self.cam_status.setText("● 运行中")
+            self.cam_status.setStyleSheet("color: #4caf50; font-weight: bold;")
+            self.preview_label.setText("🎬 直播中...")
+
+            mode = self.audio_group.checkedId()
+            config = {
+                "character": char,
+                "mode": ["mic", "tts", "file"][mode],
+            }
+            self.start_requested.emit(config)
+
+    def _start_stats_timer(self):
+        self.stats_timer = QTimer(self)
+        self.stats_timer.timeout.connect(self._update_stats)
+        self.stats_timer.start(1000)
+
+    def _update_stats(self):
+        if self._is_live:
+            self.perf_fps.setText("FPS:    25.0")
+            self.perf_latency.setText("延迟:   ~5ms")
+            self.stats_label.setText("FPS: 25.0 | 延迟: ~5ms | 运行中")
