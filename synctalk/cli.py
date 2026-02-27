@@ -68,6 +68,25 @@ def cmd_inference(args):
     )
 
 
+def cmd_live(args):
+    from .realtime.pipeline import RealtimePipeline
+
+    pipeline = RealtimePipeline(
+        character_name=args.name,
+        device_str=args.device,
+        camera_width=args.width,
+        camera_height=args.height,
+        fps=args.fps,
+        enable_virtual_camera=not args.no_camera,
+        enable_preview=not args.no_preview,
+    )
+
+    if args.audio_file:
+        pipeline.run_with_audio_file(args.audio_file, loop=args.loop)
+    else:
+        pipeline.run_with_microphone(mic_device_index=args.mic_device)
+
+
 def cmd_serve(args):
     import uvicorn
     uvicorn.run(
@@ -119,6 +138,19 @@ def main():
     p_infer.add_argument("--config", default=None, help="YAML config file")
     p_infer.add_argument("--device", default="auto")
 
+    # Live
+    p_live = subparsers.add_parser("live", help="Real-time lip-sync with virtual camera")
+    p_live.add_argument("--name", required=True, help="Character name")
+    p_live.add_argument("--audio_file", default=None, help="Audio file for playback mode")
+    p_live.add_argument("--mic_device", type=int, default=None, help="Microphone device index")
+    p_live.add_argument("--loop", action="store_true", help="Loop audio playback")
+    p_live.add_argument("--width", type=int, default=1280, help="Camera output width")
+    p_live.add_argument("--height", type=int, default=720, help="Camera output height")
+    p_live.add_argument("--fps", type=int, default=25, help="Target FPS")
+    p_live.add_argument("--no_camera", action="store_true", help="Disable virtual camera")
+    p_live.add_argument("--no_preview", action="store_true", help="Disable preview window")
+    p_live.add_argument("--device", default="auto")
+
     # Serve
     p_serve = subparsers.add_parser("serve", help="Start API server")
     p_serve.add_argument("--host", default="0.0.0.0")
@@ -135,6 +167,7 @@ def main():
         "preprocess": cmd_preprocess,
         "train": cmd_train,
         "inference": cmd_inference,
+        "live": cmd_live,
         "serve": cmd_serve,
     }
     commands[args.command](args)
