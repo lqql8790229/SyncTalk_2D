@@ -70,6 +70,7 @@ def cmd_inference(args):
 
 def cmd_live(args):
     from .realtime.pipeline import RealtimePipeline
+    import queue
 
     pipeline = RealtimePipeline(
         character_name=args.name,
@@ -83,8 +84,37 @@ def cmd_live(args):
 
     if args.audio_file:
         pipeline.run_with_audio_file(args.audio_file, loop=args.loop)
+    elif args.tts:
+        from .tts import EdgeTTSEngine
+        tts = EdgeTTSEngine(voice=args.tts_voice)
+        text_queue = queue.Queue()
+
+        import threading
+        def _text_input():
+            print("TTS mode: type text and press Enter (Ctrl+C to quit)")
+            try:
+                while True:
+                    text = input("> ")
+                    if text.strip():
+                        text_queue.put(text.strip())
+            except (EOFError, KeyboardInterrupt):
+                text_queue.put(None)
+
+        input_thread = threading.Thread(target=_text_input, daemon=True)
+        input_thread.start()
+        pipeline.run_with_tts(tts, text_queue)
     else:
         pipeline.run_with_microphone(mic_device_index=args.mic_device)
+
+
+def cmd_cloud_server(args):
+    import uvicorn
+    uvicorn.run(
+        "synctalk.server.app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
 
 
 def cmd_serve(args):
@@ -143,6 +173,8 @@ def main():
     p_live.add_argument("--name", required=True, help="Character name")
     p_live.add_argument("--audio_file", default=None, help="Audio file for playback mode")
     p_live.add_argument("--mic_device", type=int, default=None, help="Microphone device index")
+    p_live.add_argument("--tts", action="store_true", help="Enable TTS text input mode")
+    p_live.add_argument("--tts_voice", default="zh-CN-XiaoxiaoNeural", help="TTS voice name")
     p_live.add_argument("--loop", action="store_true", help="Loop audio playback")
     p_live.add_argument("--width", type=int, default=1280, help="Camera output width")
     p_live.add_argument("--height", type=int, default=720, help="Camera output height")
@@ -150,6 +182,12 @@ def main():
     p_live.add_argument("--no_camera", action="store_true", help="Disable virtual camera")
     p_live.add_argument("--no_preview", action="store_true", help="Disable preview window")
     p_live.add_argument("--device", default="auto")
+
+    # Cloud server
+    p_cloud = subparsers.add_parser("cloud", help="Start cloud API server")
+    p_cloud.add_argument("--host", default="0.0.0.0")
+    p_cloud.add_argument("--port", type=int, default=9000)
+    p_cloud.add_argument("--reload", action="store_true")
 
     # Serve
     p_serve = subparsers.add_parser("serve", help="Start API server")
@@ -169,6 +207,7 @@ def main():
         "inference": cmd_inference,
         "live": cmd_live,
         "serve": cmd_serve,
+        "cloud": cmd_cloud_server,
     }
     commands[args.command](args)
 

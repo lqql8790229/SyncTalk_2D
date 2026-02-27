@@ -61,6 +61,12 @@ class Character:
         else:
             self.model.load_state_dict(ckpt)
         self.model.eval()
+
+        self.use_fp16 = self.device.type == "cuda"
+        if self.use_fp16:
+            self.model = self.model.half()
+            logger.info("FP16 enabled for GPU inference")
+
         logger.info(f"Loaded model: {checkpoint_path}")
 
     def _load_frames(self):
@@ -133,12 +139,21 @@ class Character:
         audio_feat = torch.from_numpy(audio_features).reshape(*feat_shape)
         audio_feat = audio_feat.unsqueeze(0).to(self.device)
 
+        if self.use_fp16:
+            img_concat = img_concat.half()
+            audio_feat = audio_feat.half()
+
         pred = self.model(img_concat, audio_feat)[0]
-        pred = pred.cpu().numpy().transpose(1, 2, 0) * 255
+        pred = pred.float().cpu().numpy().transpose(1, 2, 0) * 255
         pred = np.array(pred, dtype=np.uint8)
 
         crop_img_ori[c_start:c_end, c_start:c_end] = pred
         crop_img_ori = cv2.resize(crop_img_ori, (w, h), interpolation=cv2.INTER_CUBIC)
         img[ymin:ymax, xmin:xmax] = crop_img_ori
 
+        return img
+
+    def get_silent_frame(self, frame_idx: int) -> np.ndarray:
+        """Return the original frame without lip-sync (for silent segments)."""
+        img, _, _ = self.get_frame(frame_idx)
         return img
