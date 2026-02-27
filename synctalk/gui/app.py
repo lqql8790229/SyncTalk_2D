@@ -5,9 +5,10 @@ import logging
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
     QVBoxLayout, QHBoxLayout, QLabel, QStatusBar,
+    QGroupBox, QFormLayout, QComboBox, QLineEdit, QPushButton,
+    QMessageBox, QStackedWidget,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 
 from .styles import STYLESHEET
 from .login_view import LoginView
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    """Main application window with tab navigation."""
+    """Main application window with login/logout and tab navigation."""
 
     def __init__(self, auth_client=None):
         super().__init__()
@@ -36,8 +37,16 @@ class MainWindow(QMainWindow):
         self.main_layout = QVBoxLayout(central)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.stack = QStackedWidget()
+        self.main_layout.addWidget(self.stack)
+
         self.login_view = LoginView(self.auth_client)
         self.login_view.login_success.connect(self._on_login_success)
+        self.stack.addWidget(self.login_view)
+
+        self.app_container = QWidget()
+        app_layout = QVBoxLayout(self.app_container)
+        app_layout.setContentsMargins(0, 0, 0, 0)
 
         self.tabs = QTabWidget()
         self.live_view = LiveView()
@@ -45,15 +54,19 @@ class MainWindow(QMainWindow):
         self.settings_view = self._build_settings_view()
 
         self.tabs.addTab(self.live_view, "🎬 直播控台")
-        self.tabs.addTab(self.train_view, "🎓 训练数字人")
+        self.tabs.addTab(self.train_view, "🎓 我的数字人")
         self.tabs.addTab(self.settings_view, "⚙️ 设置")
+        app_layout.addWidget(self.tabs)
+        self.stack.addWidget(self.app_container)
 
         if self.auth_client and self.auth_client.is_authenticated:
-            self._show_main_ui({"email": self.auth_client.email,
-                                 "plan": self.auth_client.plan})
+            self._on_login_success({
+                "email": self.auth_client.email,
+                "plan": self.auth_client.plan,
+                "user_id": self.auth_client.user_id,
+            })
         else:
-            self.main_layout.addWidget(self.login_view)
-            self.tabs.hide()
+            self.stack.setCurrentWidget(self.login_view)
 
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(
@@ -63,17 +76,38 @@ class MainWindow(QMainWindow):
 
     def _on_login_success(self, data):
         self._user_data = data
-        self.login_view.hide()
-        self._show_main_ui(data)
-
-    def _show_main_ui(self, data):
-        self.main_layout.addWidget(self.tabs)
-        self.tabs.show()
         email = data.get("email", "")
         plan = data.get("plan", "free")
         plan_labels = {"free": "免费版", "pro": "Pro", "business": "Business"}
+
+        self.settings_email.setText(email)
+        self.settings_plan.setText(plan_labels.get(plan, plan))
+
+        self.stack.setCurrentWidget(self.app_container)
         self.status_bar.showMessage(
             f"已登录: {email} | 方案: {plan_labels.get(plan, plan)} | SyncTalk v1.0.0")
+
+    def _on_logout(self):
+        reply = QMessageBox.question(
+            self, "确认登出", "确定要退出当前账号吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if self.auth_client:
+            self.auth_client.logout()
+        self._user_data = None
+
+        self.login_view.login_email.clear()
+        self.login_view.login_password.clear()
+        self.login_view.stack.setCurrentIndex(0)
+
+        self.settings_email.setText("未登录")
+        self.settings_plan.setText("--")
+
+        self.stack.setCurrentWidget(self.login_view)
+        self.status_bar.showMessage("已登出")
 
     def _build_settings_view(self):
         w = QWidget()
@@ -85,30 +119,19 @@ class MainWindow(QMainWindow):
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
 
-        from PyQt6.QtWidgets import QGroupBox, QFormLayout, QComboBox, QLineEdit
-
         account_box = QGroupBox("账号信息")
         account_layout = QFormLayout(account_box)
         self.settings_email = QLabel("未登录")
         self.settings_plan = QLabel("--")
         account_layout.addRow("邮箱:", self.settings_email)
         account_layout.addRow("方案:", self.settings_plan)
-        layout.addWidget(account_box)
 
-        tts_box = QGroupBox("TTS 语音设置")
-        tts_layout = QFormLayout(tts_box)
-        self.tts_voice_combo = QComboBox()
-        self.tts_voice_combo.addItems([
-            "zh-CN-XiaoxiaoNeural (晓晓)",
-            "zh-CN-YunxiNeural (云希)",
-            "zh-CN-YunyangNeural (云扬)",
-            "zh-CN-XiaoyiNeural (晓伊)",
-            "en-US-JennyNeural (Jenny)",
-            "en-US-GuyNeural (Guy)",
-            "ja-JP-NanamiNeural (七海)",
-        ])
-        tts_layout.addRow("语音:", self.tts_voice_combo)
-        layout.addWidget(tts_box)
+        btn_logout = QPushButton("退出登录")
+        btn_logout.setObjectName("danger")
+        btn_logout.setMaximumWidth(120)
+        btn_logout.clicked.connect(self._on_logout)
+        account_layout.addRow("", btn_logout)
+        layout.addWidget(account_box)
 
         perf_box = QGroupBox("性能设置")
         perf_layout = QFormLayout(perf_box)
@@ -123,8 +146,8 @@ class MainWindow(QMainWindow):
 
         server_box = QGroupBox("服务器")
         server_layout = QFormLayout(server_box)
-        self.server_url = QLineEdit("http://localhost:9000")
-        server_layout.addRow("云端 API:", self.server_url)
+        self.server_url_input = QLineEdit("http://localhost:9000")
+        server_layout.addRow("云端 API:", self.server_url_input)
         layout.addWidget(server_box)
 
         layout.addStretch()
