@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+dataset/
+checkpoint/
+syncnet_ckpt/
+result/*.mp4
+train_tmp_img/
+logs/
+*.onnx
+.ruff_cache/
